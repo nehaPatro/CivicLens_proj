@@ -79,12 +79,24 @@ def _draw_thin_boxes(frame, results, detection_type: str):
 def run_image_detection(input_path: str, output_path: str, detection_type: str):
     """Run YOLO inference on a single image and save the annotated result."""
     model = get_model_for_type(detection_type)
+
     frame = cv2.imread(input_path)
     if frame is None:
         raise ValueError("Could not read the uploaded image.")
 
-    results = model.predict(source=frame, conf=settings.yolo_confidence_threshold, verbose=False)
-    annotated, boxes_data = _draw_thin_boxes(frame.copy(), results, detection_type)
+    conf = getattr(settings, f"{detection_type}_confidence_threshold")
+
+    results = model.predict(
+        source=frame,
+        conf=conf,
+        verbose=False
+    )
+
+    annotated, boxes_data = _draw_thin_boxes(
+        frame.copy(),
+        results,
+        detection_type
+    )
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     cv2.imwrite(output_path, annotated)
@@ -95,35 +107,83 @@ def run_image_detection(input_path: str, output_path: str, detection_type: str):
 def run_video_detection(input_path: str, output_path: str, detection_type: str):
     """Run YOLO inference frame-by-frame on a video and save the annotated result."""
     model = get_model_for_type(detection_type)
-    cap = cv2.VideoCapture(input_path)
-    if not cap.isOpened():
-        raise ValueError("Could not read the uploaded video.")
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 24
+    cap = cv2.VideoCapture(input_path)
+
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {input_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    print("=" * 50)
+    print("VIDEO INFORMATION")
+    print(f"Input: {input_path}")
+    print(f"Output: {output_path}")
+    print(f"FPS: {fps}")
+    print(f"Width: {width}")
+    print(f"Height: {height}")
+    print(f"Frames: {frame_count}")
+    print("=" * 50)
+
+    if fps is None or fps <= 1:
+        fps = 30
+
+    if width <= 0 or height <= 0:
+        cap.release()
+        raise ValueError("Invalid video dimensions.")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
+    if not writer.isOpened():
+        cap.release()
+        raise ValueError("VideoWriter could not be opened.")
+
     total_objects = 0
-    frame_count = 0
+    processed_frames = 0
 
     while True:
         ret, frame = cap.read()
+
         if not ret:
             break
-        frame_count += 1
 
-        # Run inference on every frame (can be optimized to skip frames for speed)
-        results = model.predict(source=frame, conf=settings.yolo_confidence_threshold, verbose=False)
-        annotated, boxes_data = _draw_thin_boxes(frame, results, detection_type)
-        total_objects += len(boxes_data)
+        results = model.predict(
+            source=frame,
+            conf=getattr(settings, f"{detection_type}_confidence_threshold"),
+            verbose=False
+        )
+
+        annotated, boxes = _draw_thin_boxes(
+            frame.copy(),
+            results,
+            detection_type
+        )
+
         writer.write(annotated)
+
+        total_objects += len(boxes)
+        processed_frames += 1
 
     cap.release()
     writer.release()
 
-    avg_objects = round(total_objects / frame_count, 2) if frame_count else 0
-    return {"frames_processed": frame_count, "total_objects_detected": total_objects, "avg_objects_per_frame": avg_objects}
+    cv2.destroyAllWindows()
+
+    print("Output Exists:", os.path.exists(output_path))
+
+    if os.path.exists(output_path):
+        print("Output Size:", os.path.getsize(output_path), "bytes")
+
+    return {
+        "frames_processed": processed_frames,
+        "total_objects_detected": total_objects,
+        "avg_objects_per_frame": round(
+            total_objects / processed_frames, 2
+        ) if processed_frames else 0
+    }

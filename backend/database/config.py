@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     # YOLO
     pothole_model_path: str = "models_ai/pothole.pt"
     flood_model_path: str = "models_ai/flood.pt"
-    yolo_confidence_threshold: float = 0.35
+    pothole_confidence_threshold: float = 0.35
+    flood_confidence_threshold: float = 0.15
 
     port: int = 8000
 
